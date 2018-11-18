@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: s3-event-notification
+
+Resources:
+  InputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${RandomName}'
+      NotificationConfiguration:
+        LambdaConfigurations:
+        - Function: !GetAtt NotificationLambda.Arn
+          Event: s3:ObjectCreated:*
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt NotificationLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub 'arn:aws:s3:::${RandomName}'
+
+  RandomName:
+    Type: Custom::RandomNameGenerator
+    Properties:
+      ServiceToken: !GetAtt 'RandomNameGenerator.Arn'
+
+  RandomNameGenerator:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Timeout: 30
+      Role: !GetAtt 'LambdaBasicExecutionRole.Arn'
+      Runtime: python3.6
+      Code:
+        ZipFile: |
+          import string
+          import random
+          import cfnresponse
+          def lambda_handler(event, context):
+              if event['RequestType'] == 'Create':
+                  event['PhysicalResourceId'] = ''.join(random.choice(string.ascii_lowercase) for _ in range(16))
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, event['PhysicalResourceId'])
+
+  LambdaBasicExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+          Condition: {}
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  NotificationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: BucketEventHandler
+      Handler: index.handler
+      Runtime: python3.6
+      Timeout: 60
+      Role: !GetAtt LambdaBasicExecutionRole.Arn
+      Code:
+        ZipFile: |
+          def handler(event, ctx):
+              print(event)
+
+Outputs:
+  BucketName:
+    Value: !Ref InputBucket
